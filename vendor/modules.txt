@@ -209,7 +209,7 @@ github.com/googleapis/gax-go/v2/apierror
 github.com/googleapis/gax-go/v2/apierror/internal/proto
 # github.com/googleapis/go-type-adapters v1.0.0
 github.com/googleapis/go-type-adapters/adapters
-# github.com/gophercloud/gophercloud v0.24.0
+# github.com/gophercloud/gophercloud v1.1.1
 ## explicit
 github.com/gophercloud/gophercloud
 github.com/gophercloud/gophercloud/openstack
@@ -427,7 +427,7 @@ go.opencensus.io/trace
 go.opencensus.io/trace/internal
 go.opencensus.io/trace/propagation
 go.opencensus.io/trace/tracestate
-# golang.org/x/crypto v0.0.0-20220427172511-eb4f295cb31f
+# golang.org/x/crypto v0.0.0-20220829220503-c86fa9a7ed90
 golang.org/x/crypto/acme
 golang.org/x/crypto/acme/autocert
 golang.org/x/crypto/pbkdf2

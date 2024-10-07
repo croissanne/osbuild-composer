@@ -1,4 +1,4 @@
-// Copyright 2022 Google LLC
+// Copyright 2023 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,16 +20,17 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
+	"time"
 
+	computepb "cloud.google.com/go/compute/apiv1/computepb"
 	gax "github.com/googleapis/gax-go/v2"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
 	"google.golang.org/api/option/internaloption"
 	httptransport "google.golang.org/api/transport/http"
-	computepb "google.golang.org/genproto/googleapis/cloud/compute/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -42,7 +43,15 @@ type RegionInstancesCallOptions struct {
 	BulkInsert []gax.CallOption
 }
 
-// internalRegionInstancesClient is an interface that defines the methods availaible from Google Compute Engine API.
+func defaultRegionInstancesRESTCallOptions() *RegionInstancesCallOptions {
+	return &RegionInstancesCallOptions{
+		BulkInsert: []gax.CallOption{
+			gax.WithTimeout(600000 * time.Millisecond),
+		},
+	}
+}
+
+// internalRegionInstancesClient is an interface that defines the methods available from Google Compute Engine API.
 type internalRegionInstancesClient interface {
 	Close() error
 	setGoogleClientInfo(...string)
@@ -79,7 +88,8 @@ func (c *RegionInstancesClient) setGoogleClientInfo(keyval ...string) {
 
 // Connection returns a connection to the API service.
 //
-// Deprecated.
+// Deprecated: Connections are now pooled so this method does not always
+// return the same resource.
 func (c *RegionInstancesClient) Connection() *grpc.ClientConn {
 	return c.internalClient.Connection()
 }
@@ -102,6 +112,9 @@ type regionInstancesRESTClient struct {
 
 	// The x-goog-* metadata to be sent with each request.
 	xGoogMetadata metadata.MD
+
+	// Points back to the CallOptions field of the containing RegionInstancesClient
+	CallOptions **RegionInstancesCallOptions
 }
 
 // NewRegionInstancesRESTClient creates a new region instances rest client.
@@ -114,9 +127,11 @@ func NewRegionInstancesRESTClient(ctx context.Context, opts ...option.ClientOpti
 		return nil, err
 	}
 
+	callOpts := defaultRegionInstancesRESTCallOptions()
 	c := &regionInstancesRESTClient{
-		endpoint:   endpoint,
-		httpClient: httpClient,
+		endpoint:    endpoint,
+		httpClient:  httpClient,
+		CallOptions: &callOpts,
 	}
 	c.setGoogleClientInfo()
 
@@ -130,7 +145,7 @@ func NewRegionInstancesRESTClient(ctx context.Context, opts ...option.ClientOpti
 	}
 	c.operationClient = opC
 
-	return &RegionInstancesClient{internalClient: c, CallOptions: &RegionInstancesCallOptions{}}, nil
+	return &RegionInstancesClient{internalClient: c, CallOptions: callOpts}, nil
 }
 
 func defaultRegionInstancesRESTClientOptions() []option.ClientOption {
@@ -146,7 +161,7 @@ func defaultRegionInstancesRESTClientOptions() []option.ClientOption {
 // the `x-goog-api-client` header passed on each request. Intended for
 // use by Google-written clients.
 func (c *regionInstancesRESTClient) setGoogleClientInfo(keyval ...string) {
-	kv := append([]string{"gl-go", versionGo()}, keyval...)
+	kv := append([]string{"gl-go", gax.GoVersion}, keyval...)
 	kv = append(kv, "gapic", getVersionClient(), "gax", gax.Version, "rest", "UNKNOWN")
 	c.xGoogMetadata = metadata.Pairs("x-goog-api-client", gax.XGoogHeader(kv...))
 }
@@ -164,7 +179,7 @@ func (c *regionInstancesRESTClient) Close() error {
 
 // Connection returns a connection to the API service.
 //
-// Deprecated.
+// Deprecated: This method always returns nil.
 func (c *regionInstancesRESTClient) Connection() *grpc.ClientConn {
 	return nil
 }
@@ -195,6 +210,7 @@ func (c *regionInstancesRESTClient) BulkInsert(ctx context.Context, req *compute
 	md := metadata.Pairs("x-goog-request-params", fmt.Sprintf("%s=%v&%s=%v", "project", url.QueryEscape(req.GetProject()), "region", url.QueryEscape(req.GetRegion())))
 
 	headers := buildHeaders(ctx, c.xGoogMetadata, md, metadata.Pairs("Content-Type", "application/json"))
+	opts = append((*c.CallOptions).BulkInsert[0:len((*c.CallOptions).BulkInsert):len((*c.CallOptions).BulkInsert)], opts...)
 	unm := protojson.UnmarshalOptions{AllowPartial: true, DiscardUnknown: true}
 	resp := &computepb.Operation{}
 	e := gax.Invoke(ctx, func(ctx context.Context, settings gax.CallSettings) error {
@@ -218,13 +234,13 @@ func (c *regionInstancesRESTClient) BulkInsert(ctx context.Context, req *compute
 			return err
 		}
 
-		buf, err := ioutil.ReadAll(httpRsp.Body)
+		buf, err := io.ReadAll(httpRsp.Body)
 		if err != nil {
 			return err
 		}
 
 		if err := unm.Unmarshal(buf, resp); err != nil {
-			return maybeUnknownEnum(err)
+			return err
 		}
 
 		return nil

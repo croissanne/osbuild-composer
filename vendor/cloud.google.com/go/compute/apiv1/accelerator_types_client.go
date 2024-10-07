@@ -1,4 +1,4 @@
-// Copyright 2022 Google LLC
+// Copyright 2023 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,19 +19,20 @@ package compute
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"math"
 	"net/http"
 	"net/url"
 	"sort"
+	"time"
 
+	computepb "cloud.google.com/go/compute/apiv1/computepb"
 	gax "github.com/googleapis/gax-go/v2"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 	"google.golang.org/api/option/internaloption"
 	httptransport "google.golang.org/api/transport/http"
-	computepb "google.golang.org/genproto/googleapis/cloud/compute/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -47,7 +48,48 @@ type AcceleratorTypesCallOptions struct {
 	List           []gax.CallOption
 }
 
-// internalAcceleratorTypesClient is an interface that defines the methods availaible from Google Compute Engine API.
+func defaultAcceleratorTypesRESTCallOptions() *AcceleratorTypesCallOptions {
+	return &AcceleratorTypesCallOptions{
+		AggregatedList: []gax.CallOption{
+			gax.WithTimeout(600000 * time.Millisecond),
+			gax.WithRetry(func() gax.Retryer {
+				return gax.OnHTTPCodes(gax.Backoff{
+					Initial:    100 * time.Millisecond,
+					Max:        60000 * time.Millisecond,
+					Multiplier: 1.30,
+				},
+					http.StatusGatewayTimeout,
+					http.StatusServiceUnavailable)
+			}),
+		},
+		Get: []gax.CallOption{
+			gax.WithTimeout(600000 * time.Millisecond),
+			gax.WithRetry(func() gax.Retryer {
+				return gax.OnHTTPCodes(gax.Backoff{
+					Initial:    100 * time.Millisecond,
+					Max:        60000 * time.Millisecond,
+					Multiplier: 1.30,
+				},
+					http.StatusGatewayTimeout,
+					http.StatusServiceUnavailable)
+			}),
+		},
+		List: []gax.CallOption{
+			gax.WithTimeout(600000 * time.Millisecond),
+			gax.WithRetry(func() gax.Retryer {
+				return gax.OnHTTPCodes(gax.Backoff{
+					Initial:    100 * time.Millisecond,
+					Max:        60000 * time.Millisecond,
+					Multiplier: 1.30,
+				},
+					http.StatusGatewayTimeout,
+					http.StatusServiceUnavailable)
+			}),
+		},
+	}
+}
+
+// internalAcceleratorTypesClient is an interface that defines the methods available from Google Compute Engine API.
 type internalAcceleratorTypesClient interface {
 	Close() error
 	setGoogleClientInfo(...string)
@@ -60,7 +102,7 @@ type internalAcceleratorTypesClient interface {
 // AcceleratorTypesClient is a client for interacting with Google Compute Engine API.
 // Methods, except Close, may be called concurrently. However, fields must not be modified concurrently with method calls.
 //
-// Services
+// # Services
 //
 // The AcceleratorTypes API.
 type AcceleratorTypesClient struct {
@@ -88,7 +130,8 @@ func (c *AcceleratorTypesClient) setGoogleClientInfo(keyval ...string) {
 
 // Connection returns a connection to the API service.
 //
-// Deprecated.
+// Deprecated: Connections are now pooled so this method does not always
+// return the same resource.
 func (c *AcceleratorTypesClient) Connection() *grpc.ClientConn {
 	return c.internalClient.Connection()
 }
@@ -118,11 +161,14 @@ type acceleratorTypesRESTClient struct {
 
 	// The x-goog-* metadata to be sent with each request.
 	xGoogMetadata metadata.MD
+
+	// Points back to the CallOptions field of the containing AcceleratorTypesClient
+	CallOptions **AcceleratorTypesCallOptions
 }
 
 // NewAcceleratorTypesRESTClient creates a new accelerator types rest client.
 //
-// Services
+// # Services
 //
 // The AcceleratorTypes API.
 func NewAcceleratorTypesRESTClient(ctx context.Context, opts ...option.ClientOption) (*AcceleratorTypesClient, error) {
@@ -132,13 +178,15 @@ func NewAcceleratorTypesRESTClient(ctx context.Context, opts ...option.ClientOpt
 		return nil, err
 	}
 
+	callOpts := defaultAcceleratorTypesRESTCallOptions()
 	c := &acceleratorTypesRESTClient{
-		endpoint:   endpoint,
-		httpClient: httpClient,
+		endpoint:    endpoint,
+		httpClient:  httpClient,
+		CallOptions: &callOpts,
 	}
 	c.setGoogleClientInfo()
 
-	return &AcceleratorTypesClient{internalClient: c, CallOptions: &AcceleratorTypesCallOptions{}}, nil
+	return &AcceleratorTypesClient{internalClient: c, CallOptions: callOpts}, nil
 }
 
 func defaultAcceleratorTypesRESTClientOptions() []option.ClientOption {
@@ -154,7 +202,7 @@ func defaultAcceleratorTypesRESTClientOptions() []option.ClientOption {
 // the `x-goog-api-client` header passed on each request. Intended for
 // use by Google-written clients.
 func (c *acceleratorTypesRESTClient) setGoogleClientInfo(keyval ...string) {
-	kv := append([]string{"gl-go", versionGo()}, keyval...)
+	kv := append([]string{"gl-go", gax.GoVersion}, keyval...)
 	kv = append(kv, "gapic", getVersionClient(), "gax", gax.Version, "rest", "UNKNOWN")
 	c.xGoogMetadata = metadata.Pairs("x-goog-api-client", gax.XGoogHeader(kv...))
 }
@@ -169,7 +217,7 @@ func (c *acceleratorTypesRESTClient) Close() error {
 
 // Connection returns a connection to the API service.
 //
-// Deprecated.
+// Deprecated: This method always returns nil.
 func (c *acceleratorTypesRESTClient) Connection() *grpc.ClientConn {
 	return nil
 }
@@ -239,13 +287,13 @@ func (c *acceleratorTypesRESTClient) AggregatedList(ctx context.Context, req *co
 				return err
 			}
 
-			buf, err := ioutil.ReadAll(httpRsp.Body)
+			buf, err := io.ReadAll(httpRsp.Body)
 			if err != nil {
 				return err
 			}
 
 			if err := unm.Unmarshal(buf, resp); err != nil {
-				return maybeUnknownEnum(err)
+				return err
 			}
 
 			return nil
@@ -292,6 +340,7 @@ func (c *acceleratorTypesRESTClient) Get(ctx context.Context, req *computepb.Get
 	md := metadata.Pairs("x-goog-request-params", fmt.Sprintf("%s=%v&%s=%v&%s=%v", "project", url.QueryEscape(req.GetProject()), "zone", url.QueryEscape(req.GetZone()), "accelerator_type", url.QueryEscape(req.GetAcceleratorType())))
 
 	headers := buildHeaders(ctx, c.xGoogMetadata, md, metadata.Pairs("Content-Type", "application/json"))
+	opts = append((*c.CallOptions).Get[0:len((*c.CallOptions).Get):len((*c.CallOptions).Get)], opts...)
 	unm := protojson.UnmarshalOptions{AllowPartial: true, DiscardUnknown: true}
 	resp := &computepb.AcceleratorType{}
 	e := gax.Invoke(ctx, func(ctx context.Context, settings gax.CallSettings) error {
@@ -315,13 +364,13 @@ func (c *acceleratorTypesRESTClient) Get(ctx context.Context, req *computepb.Get
 			return err
 		}
 
-		buf, err := ioutil.ReadAll(httpRsp.Body)
+		buf, err := io.ReadAll(httpRsp.Body)
 		if err != nil {
 			return err
 		}
 
 		if err := unm.Unmarshal(buf, resp); err != nil {
-			return maybeUnknownEnum(err)
+			return err
 		}
 
 		return nil
@@ -394,13 +443,13 @@ func (c *acceleratorTypesRESTClient) List(ctx context.Context, req *computepb.Li
 				return err
 			}
 
-			buf, err := ioutil.ReadAll(httpRsp.Body)
+			buf, err := io.ReadAll(httpRsp.Body)
 			if err != nil {
 				return err
 			}
 
 			if err := unm.Unmarshal(buf, resp); err != nil {
-				return maybeUnknownEnum(err)
+				return err
 			}
 
 			return nil

@@ -1160,7 +1160,7 @@ func (request *ComposeRequest) GetImageRequests(distroFactory *distrofactory.Fac
 
 		// If no repositories are included with the imageRequest use the defaults for
 		// the distro selected by the blueprint, or the compose request.
-		if len(ir.Repositories) == 0 {
+		if len(ir.Repositories) == 0{ 
 			dr, err := repoRegistry.ReposByImageTypeName(originalDistroName, arch.Name(), imageType.Name())
 			if err != nil {
 				return nil, err

@@ -11,6 +11,7 @@ import (
 )
 
 type OSTreeResolveJobImpl struct {
+	repoMTLSConfig *RepositoryMTLSConfig
 }
 
 func setError(err error, result *worker.OSTreeResolveJobResult) {
@@ -52,6 +53,22 @@ func (impl *OSTreeResolveJobImpl) Run(job worker.Job) error {
 
 	for i, s := range args.Specs {
 		reqParams := ostree.SourceSpec(s)
+
+
+		if impl.repoMTLSConfig != nil {
+			match, err := impl.repoMTLSConfig.CompareBaseURL(reqParams.URL)
+			if err != nil {
+				//fail
+			}
+			if match {
+				reqParams.URL = impl.repoMTLSConfig.URL + path from reqParams.URL
+				reqParams.MTLS = &ostree.MTLS{
+					cert: impl.epoMTLSConfig.Cert
+					....
+					}
+			}
+		}
+
 		commitSpec, err := ostree.Resolve(reqParams)
 		if err != nil {
 			logWithId.Infof("Resolving ostree params failed: %v", err)

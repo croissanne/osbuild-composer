@@ -15,7 +15,7 @@ import (
 	"github.com/osbuild/osbuild-composer/internal/worker/clienterrors"
 )
 
-// Used by both depsolve and osbuild jobs
+// Used by both depsolve, ostree and osbuild jobs!
 type RepositoryMTLSConfig struct {
 	BaseURL        *url.URL
 	CA             string

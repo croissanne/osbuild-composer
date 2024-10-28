@@ -1,4 +1,4 @@
-// Copyright 2022 Google LLC
+// Copyright 2023 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,19 +19,20 @@ package compute
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"math"
 	"net/http"
 	"net/url"
 	"sort"
+	"time"
 
+	computepb "cloud.google.com/go/compute/apiv1/computepb"
 	gax "github.com/googleapis/gax-go/v2"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 	"google.golang.org/api/option/internaloption"
 	httptransport "google.golang.org/api/transport/http"
-	computepb "google.golang.org/genproto/googleapis/cloud/compute/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -47,7 +48,48 @@ type NodeTypesCallOptions struct {
 	List           []gax.CallOption
 }
 
-// internalNodeTypesClient is an interface that defines the methods availaible from Google Compute Engine API.
+func defaultNodeTypesRESTCallOptions() *NodeTypesCallOptions {
+	return &NodeTypesCallOptions{
+		AggregatedList: []gax.CallOption{
+			gax.WithTimeout(600000 * time.Millisecond),
+			gax.WithRetry(func() gax.Retryer {
+				return gax.OnHTTPCodes(gax.Backoff{
+					Initial:    100 * time.Millisecond,
+					Max:        60000 * time.Millisecond,
+					Multiplier: 1.30,
+				},
+					http.StatusGatewayTimeout,
+					http.StatusServiceUnavailable)
+			}),
+		},
+		Get: []gax.CallOption{
+			gax.WithTimeout(600000 * time.Millisecond),
+			gax.WithRetry(func() gax.Retryer {
+				return gax.OnHTTPCodes(gax.Backoff{
+					Initial:    100 * time.Millisecond,
+					Max:        60000 * time.Millisecond,
+					Multiplier: 1.30,
+				},
+					http.StatusGatewayTimeout,
+					http.StatusServiceUnavailable)
+			}),
+		},
+		List: []gax.CallOption{
+			gax.WithTimeout(600000 * time.Millisecond),
+			gax.WithRetry(func() gax.Retryer {
+				return gax.OnHTTPCodes(gax.Backoff{
+					Initial:    100 * time.Millisecond,
+					Max:        60000 * time.Millisecond,
+					Multiplier: 1.30,
+				},
+					http.StatusGatewayTimeout,
+					http.StatusServiceUnavailable)
+			}),
+		},
+	}
+}
+
+// internalNodeTypesClient is an interface that defines the methods available from Google Compute Engine API.
 type internalNodeTypesClient interface {
 	Close() error
 	setGoogleClientInfo(...string)
@@ -86,7 +128,8 @@ func (c *NodeTypesClient) setGoogleClientInfo(keyval ...string) {
 
 // Connection returns a connection to the API service.
 //
-// Deprecated.
+// Deprecated: Connections are now pooled so this method does not always
+// return the same resource.
 func (c *NodeTypesClient) Connection() *grpc.ClientConn {
 	return c.internalClient.Connection()
 }
@@ -96,7 +139,7 @@ func (c *NodeTypesClient) AggregatedList(ctx context.Context, req *computepb.Agg
 	return c.internalClient.AggregatedList(ctx, req, opts...)
 }
 
-// Get returns the specified node type. Gets a list of available node types by making a list() request.
+// Get returns the specified node type.
 func (c *NodeTypesClient) Get(ctx context.Context, req *computepb.GetNodeTypeRequest, opts ...gax.CallOption) (*computepb.NodeType, error) {
 	return c.internalClient.Get(ctx, req, opts...)
 }
@@ -116,6 +159,9 @@ type nodeTypesRESTClient struct {
 
 	// The x-goog-* metadata to be sent with each request.
 	xGoogMetadata metadata.MD
+
+	// Points back to the CallOptions field of the containing NodeTypesClient
+	CallOptions **NodeTypesCallOptions
 }
 
 // NewNodeTypesRESTClient creates a new node types rest client.
@@ -128,13 +174,15 @@ func NewNodeTypesRESTClient(ctx context.Context, opts ...option.ClientOption) (*
 		return nil, err
 	}
 
+	callOpts := defaultNodeTypesRESTCallOptions()
 	c := &nodeTypesRESTClient{
-		endpoint:   endpoint,
-		httpClient: httpClient,
+		endpoint:    endpoint,
+		httpClient:  httpClient,
+		CallOptions: &callOpts,
 	}
 	c.setGoogleClientInfo()
 
-	return &NodeTypesClient{internalClient: c, CallOptions: &NodeTypesCallOptions{}}, nil
+	return &NodeTypesClient{internalClient: c, CallOptions: callOpts}, nil
 }
 
 func defaultNodeTypesRESTClientOptions() []option.ClientOption {
@@ -150,7 +198,7 @@ func defaultNodeTypesRESTClientOptions() []option.ClientOption {
 // the `x-goog-api-client` header passed on each request. Intended for
 // use by Google-written clients.
 func (c *nodeTypesRESTClient) setGoogleClientInfo(keyval ...string) {
-	kv := append([]string{"gl-go", versionGo()}, keyval...)
+	kv := append([]string{"gl-go", gax.GoVersion}, keyval...)
 	kv = append(kv, "gapic", getVersionClient(), "gax", gax.Version, "rest", "UNKNOWN")
 	c.xGoogMetadata = metadata.Pairs("x-goog-api-client", gax.XGoogHeader(kv...))
 }
@@ -165,7 +213,7 @@ func (c *nodeTypesRESTClient) Close() error {
 
 // Connection returns a connection to the API service.
 //
-// Deprecated.
+// Deprecated: This method always returns nil.
 func (c *nodeTypesRESTClient) Connection() *grpc.ClientConn {
 	return nil
 }
@@ -235,13 +283,13 @@ func (c *nodeTypesRESTClient) AggregatedList(ctx context.Context, req *computepb
 				return err
 			}
 
-			buf, err := ioutil.ReadAll(httpRsp.Body)
+			buf, err := io.ReadAll(httpRsp.Body)
 			if err != nil {
 				return err
 			}
 
 			if err := unm.Unmarshal(buf, resp); err != nil {
-				return maybeUnknownEnum(err)
+				return err
 			}
 
 			return nil
@@ -276,7 +324,7 @@ func (c *nodeTypesRESTClient) AggregatedList(ctx context.Context, req *computepb
 	return it
 }
 
-// Get returns the specified node type. Gets a list of available node types by making a list() request.
+// Get returns the specified node type.
 func (c *nodeTypesRESTClient) Get(ctx context.Context, req *computepb.GetNodeTypeRequest, opts ...gax.CallOption) (*computepb.NodeType, error) {
 	baseUrl, err := url.Parse(c.endpoint)
 	if err != nil {
@@ -288,6 +336,7 @@ func (c *nodeTypesRESTClient) Get(ctx context.Context, req *computepb.GetNodeTyp
 	md := metadata.Pairs("x-goog-request-params", fmt.Sprintf("%s=%v&%s=%v&%s=%v", "project", url.QueryEscape(req.GetProject()), "zone", url.QueryEscape(req.GetZone()), "node_type", url.QueryEscape(req.GetNodeType())))
 
 	headers := buildHeaders(ctx, c.xGoogMetadata, md, metadata.Pairs("Content-Type", "application/json"))
+	opts = append((*c.CallOptions).Get[0:len((*c.CallOptions).Get):len((*c.CallOptions).Get)], opts...)
 	unm := protojson.UnmarshalOptions{AllowPartial: true, DiscardUnknown: true}
 	resp := &computepb.NodeType{}
 	e := gax.Invoke(ctx, func(ctx context.Context, settings gax.CallSettings) error {
@@ -311,13 +360,13 @@ func (c *nodeTypesRESTClient) Get(ctx context.Context, req *computepb.GetNodeTyp
 			return err
 		}
 
-		buf, err := ioutil.ReadAll(httpRsp.Body)
+		buf, err := io.ReadAll(httpRsp.Body)
 		if err != nil {
 			return err
 		}
 
 		if err := unm.Unmarshal(buf, resp); err != nil {
-			return maybeUnknownEnum(err)
+			return err
 		}
 
 		return nil
@@ -390,13 +439,13 @@ func (c *nodeTypesRESTClient) List(ctx context.Context, req *computepb.ListNodeT
 				return err
 			}
 
-			buf, err := ioutil.ReadAll(httpRsp.Body)
+			buf, err := io.ReadAll(httpRsp.Body)
 			if err != nil {
 				return err
 			}
 
 			if err := unm.Unmarshal(buf, resp); err != nil {
-				return maybeUnknownEnum(err)
+				return err
 			}
 
 			return nil
